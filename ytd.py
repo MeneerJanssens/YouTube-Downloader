@@ -5,6 +5,9 @@ import os
 import json
 import shutil
 import sys
+import urllib.request
+import zipfile
+import tempfile
 
 try:
     import yt_dlp
@@ -21,6 +24,9 @@ def _resource(filename):
 
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ytd_config.json")
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads")
+FFMPEG_DIR = os.path.join(os.path.expanduser("~"), ".ytd", "bin")
+FFMPEG_EXE = os.path.join(FFMPEG_DIR, "ffmpeg" + (".exe" if sys.platform == "win32" else ""))
+FFMPEG_ZIP_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 
 FORMAT_OPTIONS = {
     "Best quality (video + audio)": "bestvideo+bestaudio/best",
@@ -33,7 +39,13 @@ FORMAT_OPTIONS = {
 
 
 def ffmpeg_available():
-    return shutil.which("ffmpeg") is not None
+    return shutil.which("ffmpeg") is not None or os.path.isfile(FFMPEG_EXE)
+
+
+def ffmpeg_location():
+    if os.path.isfile(FFMPEG_EXE):
+        return FFMPEG_DIR
+    return None
 
 
 def load_config():
@@ -64,7 +76,7 @@ class YTDApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("YTD – Video Downloader")
-        self.minsize(540, 620)
+        self.minsize(540, 640)
         try:
             self.iconbitmap(_resource("icon.ico"))
         except Exception:
@@ -74,11 +86,11 @@ class YTDApp(tk.Tk):
         self._download_folder = cfg.get("folder", DEFAULT_FOLDER)
         self._saved_format = cfg.get("format")
 
-        self._queue = []          # list of {"url", "title", "status"}
+        self._queue = []
         self._cancel_event = threading.Event()
         self._is_running = False
         self._fetched_title = None
-        self._fetch_job = None    # pending after() id for auto-fetch
+        self._fetch_job = None
 
         self._build_ui()
 
@@ -138,6 +150,19 @@ class YTDApp(tk.Tk):
         self._folder_label.pack(side="left", fill="x", expand=True)
         tk.Button(folder_frame, text="Browse…", command=self._browse).pack(side="left", padx=(6, 0))
 
+        # FFmpeg status row
+        ffmpeg_frame = tk.Frame(self)
+        ffmpeg_frame.pack(fill="x", **pad)
+        tk.Label(ffmpeg_frame, text="FFmpeg:", width=7, anchor="w").pack(side="left")
+        self._ffmpeg_status_var = tk.StringVar()
+        self._ffmpeg_status_lbl = tk.Label(ffmpeg_frame, textvariable=self._ffmpeg_status_var, anchor="w")
+        self._ffmpeg_status_lbl.pack(side="left", fill="x", expand=True)
+        self._ffmpeg_btn = tk.Button(
+            ffmpeg_frame, text="Install", command=self._install_ffmpeg,
+            bg="#ca5010", fg="white", relief="flat", padx=8,
+        )
+        self._update_ffmpeg_ui()
+
         # Queue section
         tk.Label(self, text="Queue", anchor="w", font=("Segoe UI", 9, "bold")).pack(
             fill="x", padx=12, pady=(10, 2)
@@ -196,6 +221,70 @@ class YTDApp(tk.Tk):
         )
         self._cancel_btn.pack(side="left", padx=6)
 
+    # ── FFmpeg install ─────────────────────────────────────────────────────────
+
+    def _update_ffmpeg_ui(self):
+        if ffmpeg_available():
+            self._ffmpeg_status_var.set("Ready")
+            self._ffmpeg_status_lbl.config(fg="#107c10")
+            self._ffmpeg_btn.pack_forget()
+        else:
+            self._ffmpeg_status_var.set("Not installed — needed for best quality and MP3")
+            self._ffmpeg_status_lbl.config(fg="#ca5010")
+            self._ffmpeg_btn.pack(side="left", padx=(6, 0))
+
+    def _install_ffmpeg(self):
+        if sys.platform != "win32":
+            messagebox.showinfo(
+                "Install FFmpeg",
+                "On macOS, open Terminal and run:\n\n  brew install ffmpeg\n\n"
+                "If you don't have Homebrew: https://brew.sh",
+            )
+            return
+        self._ffmpeg_btn.config(state="disabled", text="Installing…")
+        self._ffmpeg_status_var.set("Downloading FFmpeg…")
+        threading.Thread(target=self._do_install_ffmpeg, daemon=True).start()
+
+    def _do_install_ffmpeg(self):
+        try:
+            os.makedirs(FFMPEG_DIR, exist_ok=True)
+            tmp = tempfile.mktemp(suffix=".zip")
+
+            def _progress(count, block, total):
+                if total > 0:
+                    pct = min(count * block / total * 100, 100)
+                    self.after(0, self._ffmpeg_status_var.set,
+                               f"Downloading FFmpeg… {pct:.0f}%")
+
+            urllib.request.urlretrieve(FFMPEG_ZIP_URL, tmp, reporthook=_progress)
+
+            self.after(0, self._ffmpeg_status_var.set, "Extracting…")
+            with zipfile.ZipFile(tmp) as z:
+                for name in z.namelist():
+                    if name.endswith("/bin/ffmpeg.exe"):
+                        with z.open(name) as src, open(FFMPEG_EXE, "wb") as dst:
+                            dst.write(src.read())
+                        break
+            os.unlink(tmp)
+
+            if not os.path.isfile(FFMPEG_EXE):
+                raise RuntimeError("ffmpeg.exe not found in archive")
+
+            self.after(0, self._on_ffmpeg_ready)
+        except Exception as e:
+            self.after(0, self._on_ffmpeg_error, str(e))
+
+    def _on_ffmpeg_ready(self):
+        self._log_write("✓ FFmpeg installed successfully")
+        self._ffmpeg_btn.config(state="normal", text="Install")
+        self._update_ffmpeg_ui()
+
+    def _on_ffmpeg_error(self, msg):
+        self._ffmpeg_status_var.set("Install failed — try again")
+        self._ffmpeg_status_lbl.config(fg="#c50f1f")
+        self._ffmpeg_btn.config(state="normal", text="Retry")
+        self._log_write(f"✗ FFmpeg install error: {msg}")
+
     # ── URL / info fetch ──────────────────────────────────────────────────────
 
     def _on_url_change(self, *_):
@@ -249,14 +338,6 @@ class YTDApp(tk.Tk):
         if not url:
             messagebox.showwarning("No URL", "Please paste a URL first.")
             return
-        if "Audio only" in self._fmt_var.get() and not ffmpeg_available():
-            if not messagebox.askyesno(
-                "FFmpeg not found",
-                "MP3 conversion requires FFmpeg, which wasn't detected on your PATH.\n\n"
-                "Download it from https://ffmpeg.org/download.html and add it to PATH.\n\n"
-                "Add to queue anyway (download may fail)?",
-            ):
-                return
         title = self._fetched_title or url
         self._queue.append({"url": url, "title": title, "status": "pending"})
         self._refresh_queue_list()
@@ -335,7 +416,7 @@ class YTDApp(tk.Tk):
         fmt = FORMAT_OPTIONS[fmt_key]
         audio_only = "Audio only" in fmt_key
 
-        if not audio_only and not ffmpeg_available():
+        if not ffmpeg_available() and not audio_only:
             fmt = fmt.split("/")[-1]
             self.after(0, self._log_write, "[warn] FFmpeg not found — using pre-merged format (quality may be slightly lower)")
 
@@ -347,6 +428,11 @@ class YTDApp(tk.Tk):
             "no_warnings": False,
             "logger": _YTDLogger(self._log_write),
         }
+
+        loc = ffmpeg_location()
+        if loc:
+            ydl_opts["ffmpeg_location"] = loc
+
         if audio_only:
             ydl_opts["postprocessors"] = [{
                 "key": "FFmpegExtractAudio",
