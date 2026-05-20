@@ -335,6 +335,10 @@ class YTDApp(tk.Tk):
         fmt = FORMAT_OPTIONS[fmt_key]
         audio_only = "Audio only" in fmt_key
 
+        if not audio_only and not ffmpeg_available():
+            fmt = fmt.split("/")[-1]
+            self.after(0, self._log_write, "[warn] FFmpeg not found — using pre-merged format (quality may be slightly lower)")
+
         ydl_opts = {
             "format": fmt,
             "outtmpl": os.path.join(self._download_folder, "%(title)s.%(ext)s"),
