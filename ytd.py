@@ -8,11 +8,11 @@ import sys
 import urllib.request
 import zipfile
 import tempfile
+import subprocess
 
 try:
     import yt_dlp
 except ImportError:
-    import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
     import yt_dlp
 
@@ -21,6 +21,9 @@ def _resource(filename):
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, filename)
 
+
+APP_VERSION = "1.0.3"
+RELEASES_API = "https://api.github.com/repos/MeneerJanssens/YouTube-Downloader/releases/latest"
 
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ytd_config.json")
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads")
@@ -72,11 +75,15 @@ def format_duration(seconds):
     return f"{h}:{m:02}:{s:02}" if h else f"{m}:{s:02}"
 
 
+def _version_tuple(v):
+    return tuple(int(x) for x in v.lstrip("v").split("."))
+
+
 class YTDApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("YTD – Video Downloader")
-        self.minsize(540, 640)
+        self.minsize(540, 660)
         try:
             self.iconbitmap(_resource("icon.ico"))
         except Exception:
@@ -91,11 +98,14 @@ class YTDApp(tk.Tk):
         self._is_running = False
         self._fetched_title = None
         self._fetch_job = None
+        self._pending_update_url = None
 
         self._build_ui()
 
         if self._saved_format and self._saved_format in FORMAT_OPTIONS:
             self._fmt_var.set(self._saved_format)
+
+        self.after(2000, self._check_for_updates)
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
@@ -205,21 +215,114 @@ class YTDApp(tk.Tk):
         self._log.pack(fill="x")
         logscroll.config(command=self._log.yview)
 
-        # Buttons
+        # Bottom row: Download buttons + version/update
         btn_frame = tk.Frame(self)
-        btn_frame.pack(pady=(8, 12))
+        btn_frame.pack(fill="x", padx=12, pady=(8, 12))
+
         self._start_btn = tk.Button(
             btn_frame, text="Download All", command=self._start_queue,
             bg="#0078d4", fg="white", font=("Segoe UI", 10, "bold"),
             relief="flat", padx=20, pady=6, cursor="hand2",
         )
-        self._start_btn.pack(side="left", padx=6)
+        self._start_btn.pack(side="left", padx=(0, 6))
         self._cancel_btn = tk.Button(
             btn_frame, text="Cancel", command=self._cancel,
             bg="#c50f1f", fg="white", font=("Segoe UI", 10),
             relief="flat", padx=20, pady=6, cursor="hand2", state="disabled",
         )
-        self._cancel_btn.pack(side="left", padx=6)
+        self._cancel_btn.pack(side="left")
+
+        # Version label + update button (right side)
+        self._update_btn = tk.Button(
+            btn_frame, text="", command=self._apply_update,
+            relief="flat", fg="white", bg="#107c10",
+            font=("Segoe UI", 9), padx=10, pady=6, cursor="hand2",
+        )
+        self._version_lbl = tk.Label(
+            btn_frame, text=f"v{APP_VERSION}", fg="#aaa", font=("Segoe UI", 8),
+        )
+        self._version_lbl.pack(side="right")
+
+    # ── Auto-update ───────────────────────────────────────────────────────────
+
+    def _check_for_updates(self):
+        threading.Thread(target=self._do_check_updates, daemon=True).start()
+
+    def _do_check_updates(self):
+        try:
+            req = urllib.request.Request(
+                RELEASES_API,
+                headers={"User-Agent": f"YTD/{APP_VERSION}"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+
+            latest = data["tag_name"].lstrip("v")
+            if _version_tuple(latest) <= _version_tuple(APP_VERSION):
+                return
+
+            assets = data.get("assets", [])
+            if sys.platform == "win32":
+                url = next(
+                    (a["browser_download_url"] for a in assets if a["name"].endswith(".exe")),
+                    data.get("html_url"),
+                )
+            else:
+                url = data.get("html_url")
+
+            self.after(0, self._on_update_available, latest, url)
+        except Exception:
+            pass
+
+    def _on_update_available(self, latest, url):
+        self._pending_update_url = url
+        self._version_lbl.config(text=f"v{APP_VERSION}")
+        self._update_btn.config(text=f"↑ Update to v{latest}")
+        self._update_btn.pack(side="right", padx=(0, 8))
+
+    def _apply_update(self):
+        url = self._pending_update_url
+        if not url:
+            return
+        if sys.platform != "win32":
+            import webbrowser
+            webbrowser.open(url)
+            return
+        self._update_btn.config(state="disabled", text="Downloading…")
+        threading.Thread(target=self._do_download_update, args=(url,), daemon=True).start()
+
+    def _do_download_update(self, url):
+        try:
+            tmp = tempfile.mktemp(suffix=".exe")
+
+            def _progress(count, block, total):
+                if total > 0:
+                    pct = min(count * block / total * 100, 100)
+                    self.after(0, self._update_btn.config, {"text": f"Downloading… {pct:.0f}%"})
+
+            urllib.request.urlretrieve(url, tmp, reporthook=_progress)
+            self.after(0, self._launch_updater, tmp)
+        except Exception as e:
+            self.after(0, self._update_btn.config, {"text": "Download failed — retry", "state": "normal"})
+            self.after(0, self._log_write, f"✗ Update error: {e}")
+
+    def _launch_updater(self, new_exe):
+        current = sys.executable
+        bat = tempfile.mktemp(suffix=".bat")
+        with open(bat, "w") as f:
+            f.write(
+                f"@echo off\n"
+                f"timeout /t 2 /nobreak > nul\n"
+                f'copy /Y "{new_exe}" "{current}"\n'
+                f'start "" "{current}"\n'
+                f'del "{new_exe}"\n'
+                f'del "%~f0"\n'
+            )
+        subprocess.Popen(
+            ["cmd", "/c", bat],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        self.quit()
 
     # ── FFmpeg install ─────────────────────────────────────────────────────────
 
@@ -418,7 +521,8 @@ class YTDApp(tk.Tk):
 
         if not ffmpeg_available() and not audio_only:
             fmt = fmt.split("/")[-1]
-            self.after(0, self._log_write, "[warn] FFmpeg not found — using pre-merged format (quality may be slightly lower)")
+            self.after(0, self._log_write,
+                       "[warn] FFmpeg not found — using pre-merged format (quality may be slightly lower)")
 
         ydl_opts = {
             "format": fmt,
