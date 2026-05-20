@@ -4,7 +4,12 @@ A simple desktop app for downloading YouTube videos. No Python required.
 
 ## Download
 
-Grab **YTD.exe** from the [Releases](https://github.com/MeneerJanssens/YTD/releases) page and double-click it. That's it.
+Grab the latest version from the [Releases](https://github.com/MeneerJanssens/YTD/releases) page:
+
+| Platform | File |
+|----------|------|
+| Windows  | `YTD.exe` — double-click to run |
+| macOS    | `YTD-mac.zip` — unzip, then double-click `YTD.app` |
 
 > First launch takes a few seconds — this is normal.
 
@@ -36,8 +41,20 @@ python ytd.py
 To rebuild the exe:
 
 ```
-pip install pyinstaller
-pyinstaller --onefile --windowed --name "YTD" ytd.py
+pip install pyinstaller pillow
+python create_icon.py
+pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --name YTD ytd.py
 ```
 
 The resulting `dist/YTD.exe` is self-contained and needs no Python installation.
+
+## Creating a release
+
+Push a version tag to trigger the GitHub Actions workflow, which automatically builds for both Windows and macOS:
+
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow uploads `YTD.exe` and `YTD-mac.zip` to the release automatically.

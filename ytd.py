@@ -14,6 +14,11 @@ except ImportError:
     import yt_dlp
 
 
+def _resource(filename):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, filename)
+
+
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ytd_config.json")
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Downloads")
 
@@ -60,6 +65,10 @@ class YTDApp(tk.Tk):
         super().__init__()
         self.title("YTD – Video Downloader")
         self.minsize(540, 620)
+        try:
+            self.iconbitmap(_resource("icon.ico"))
+        except Exception:
+            pass
 
         cfg = load_config()
         self._download_folder = cfg.get("folder", DEFAULT_FOLDER)
