@@ -22,7 +22,7 @@ def _resource(filename):
     return os.path.join(base, filename)
 
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 RELEASES_API = "https://api.github.com/repos/MeneerJanssens/YouTube-Downloader/releases/latest"
 
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ytd_config.json")
@@ -39,6 +39,29 @@ FORMAT_OPTIONS = {
     "360p":  "bestvideo[height<=360]+bestaudio/best[height<=360]",
     "Audio only (MP3)": "bestaudio/best",
 }
+
+# ── Colour palette ─────────────────────────────────────────────────────────────
+BG         = "#f3f3f3"
+CARD       = "#ffffff"
+BORDER     = "#dcdcdc"
+ACCENT     = "#0067b8"
+ACCENT_HV  = "#005a9e"
+GREEN      = "#107c10"
+GREEN_HV   = "#0b5e0b"
+RED        = "#c50f1f"
+RED_HV     = "#a50d1a"
+ORANGE     = "#ca5010"
+ORANGE_HV  = "#b34610"
+TEXT       = "#1a1a1a"
+TEXT_MUTED = "#888888"
+LABEL_W    = 80   # px width for left-column labels
+
+
+def _darker(hex_color, by=18):
+    r = max(0, int(hex_color[1:3], 16) - by)
+    g = max(0, int(hex_color[3:5], 16) - by)
+    b = max(0, int(hex_color[5:7], 16) - by)
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def ffmpeg_available():
@@ -83,11 +106,14 @@ class YTDApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("YTD – Video Downloader")
-        self.minsize(540, 660)
+        self.minsize(560, 680)
+        self.config(bg=BG)
         try:
             self.iconbitmap(_resource("icon.ico"))
         except Exception:
             pass
+
+        self._configure_styles()
 
         cfg = load_config()
         self._download_folder = cfg.get("folder", DEFAULT_FOLDER)
@@ -107,141 +133,230 @@ class YTDApp(tk.Tk):
 
         self.after(2000, self._check_for_updates)
 
+    # ── Styles ────────────────────────────────────────────────────────────────
+
+    def _configure_styles(self):
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        style.configure(
+            "Accent.Horizontal.TProgressbar",
+            troughcolor=BORDER, background=ACCENT,
+            bordercolor=BORDER, lightcolor=ACCENT, darkcolor=ACCENT,
+        )
+        style.configure(
+            "TCombobox", fieldbackground=CARD, background=CARD,
+            foreground=TEXT, bordercolor=BORDER, arrowcolor=TEXT,
+        )
+        style.map("TCombobox", fieldbackground=[("readonly", CARD)])
+
+    # ── UI helpers ────────────────────────────────────────────────────────────
+
+    def _btn(self, parent, text, command, bg, fg="white", font_bold=False, **kw):
+        fnt = ("Segoe UI", 9, "bold") if font_bold else ("Segoe UI", 9)
+        b = tk.Button(
+            parent, text=text, command=command, bg=bg, fg=fg,
+            activebackground=_darker(bg), activeforeground=fg,
+            relief="flat", bd=0, cursor="hand2", font=fnt, **kw,
+        )
+        b.bind("<Enter>", lambda _: b.config(bg=_darker(bg)))
+        b.bind("<Leave>", lambda _: b.config(bg=bg))
+        return b
+
+    def _card(self, parent, **pack_kw):
+        """White bordered card container."""
+        outer = tk.Frame(parent, bg=BORDER)
+        outer.pack(**pack_kw)
+        inner = tk.Frame(outer, bg=CARD)
+        inner.pack(fill="both", expand=True, padx=1, pady=1)
+        return inner
+
+    def _row(self, parent, label_text):
+        """Labelled row inside a card."""
+        f = tk.Frame(parent, bg=CARD)
+        f.pack(fill="x", padx=14, pady=5)
+        tk.Label(
+            f, text=label_text, bg=CARD, fg=TEXT_MUTED,
+            font=("Segoe UI", 9), width=8, anchor="w",
+        ).pack(side="left")
+        return f
+
+    # ── Build UI ──────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        # Thin accent bar at the very top
+        tk.Frame(self, bg=ACCENT, height=3).pack(fill="x")
+
+        outer_pad = {"padx": 14, "pady": 0}
+
+        # ── URL card ──────────────────────────────────────────────────────────
+        url_card = self._card(self, fill="x", padx=14, pady=(12, 0))
+
+        url_row = tk.Frame(url_card, bg=CARD)
+        url_row.pack(fill="x", padx=14, pady=(10, 6))
+
+        self._url_var = tk.StringVar()
+        self._url_var.trace_add("write", self._on_url_change)
+
+        url_entry_frame = tk.Frame(url_row, bg=BORDER, padx=1, pady=1)
+        url_entry_frame.pack(side="left", fill="x", expand=True)
+        tk.Entry(
+            url_entry_frame, textvariable=self._url_var,
+            relief="flat", bd=4, font=("Segoe UI", 10),
+            bg=CARD, fg=TEXT, insertbackground=TEXT,
+        ).pack(fill="x")
+
+        self._fetch_btn = self._btn(
+            url_row, "Fetch", self._fetch_info, ACCENT,
+            padx=12, pady=5, font_bold=False,
+        )
+        self._fetch_btn.pack(side="left", padx=(6, 4))
+
+        self._btn(
+            url_row, "Add to Queue", self._add_to_queue, GREEN,
+            padx=12, pady=5,
+        ).pack(side="left")
+
+        self._info_var = tk.StringVar(value="")
+        self._info_lbl = tk.Label(
+            url_card, textvariable=self._info_var, bg=CARD,
+            fg=ACCENT, font=("Segoe UI", 9), anchor="w", wraplength=520,
+        )
+        self._info_lbl.pack(fill="x", padx=14, pady=(0, 8))
+
+        # ── Settings card ─────────────────────────────────────────────────────
+        settings_card = self._card(self, fill="x", padx=14, pady=(8, 0))
+
+        # Format row
+        fmt_row = self._row(settings_card, "Format")
+        self._fmt_var = tk.StringVar(value=list(FORMAT_OPTIONS.keys())[0])
+        self._fmt_var.trace_add("write", self._save_settings)
+        ttk.Combobox(
+            fmt_row, textvariable=self._fmt_var,
+            values=list(FORMAT_OPTIONS.keys()), state="readonly",
+            font=("Segoe UI", 9), width=44,
+        ).pack(side="left", fill="x", expand=True)
+
+        # Folder row
+        folder_row = self._row(settings_card, "Save to")
+        self._folder_label = tk.Label(
+            folder_row, text=self._download_folder,
+            bg="#f8f8f8", fg=TEXT, font=("Segoe UI", 9),
+            anchor="w", relief="flat", bd=0,
+        )
+
+        folder_border = tk.Frame(folder_row, bg=BORDER, padx=1, pady=1)
+        folder_border.pack(side="left", fill="x", expand=True)
+        self._folder_label = tk.Label(
+            folder_border, text=self._download_folder,
+            bg=CARD, fg=TEXT, font=("Segoe UI", 9), anchor="w", padx=4,
+        )
+        self._folder_label.pack(fill="x")
+
+        self._btn(folder_row, "Browse…", self._browse, ACCENT, padx=10, pady=3).pack(
+            side="left", padx=(6, 0)
+        )
+
+        # FFmpeg row
+        ffmpeg_row = self._row(settings_card, "FFmpeg")
+        self._ffmpeg_status_var = tk.StringVar()
+        self._ffmpeg_status_lbl = tk.Label(
+            ffmpeg_row, textvariable=self._ffmpeg_status_var,
+            bg=CARD, font=("Segoe UI", 9), anchor="w",
+        )
+        self._ffmpeg_status_lbl.pack(side="left", fill="x", expand=True)
+        self._ffmpeg_btn = self._btn(
+            ffmpeg_row, "Install", self._install_ffmpeg, ORANGE, padx=10, pady=3,
+        )
+        tk.Frame(settings_card, bg=CARD, height=4).pack()  # bottom padding
+        self._update_ffmpeg_ui()
+
+        # ── Queue card ────────────────────────────────────────────────────────
+        tk.Label(
+            self, text="Queue", bg=BG, fg=TEXT,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w", padx=15, pady=(12, 4))
+
+        queue_card = self._card(self, fill="both", expand=True, padx=14)
+
+        self._queue_list = tk.Listbox(
+            queue_card, relief="flat", bd=0,
+            bg=CARD, fg=TEXT, selectbackground=ACCENT,
+            selectforeground="white", font=("Segoe UI", 9),
+            activestyle="none", height=5,
+        )
+        self._queue_list.pack(fill="both", expand=True, padx=1, pady=1)
+
+        remove_row = tk.Frame(queue_card, bg=CARD)
+        remove_row.pack(fill="x", padx=10, pady=(0, 6))
+        self._btn(
+            remove_row, "Remove selected", self._remove_selected,
+            "#e8e8e8", fg=TEXT, padx=8, pady=2,
+        ).pack(side="right")
+
+        # ── Progress ──────────────────────────────────────────────────────────
+        self._progress = ttk.Progressbar(
+            self, length=440, mode="determinate",
+            style="Accent.Horizontal.TProgressbar",
+        )
+        self._progress.pack(fill="x", padx=14, pady=(10, 2))
+
+        self._status_var = tk.StringVar(value="Ready.")
+        tk.Label(
+            self, textvariable=self._status_var, bg=BG,
+            fg=TEXT_MUTED, font=("Segoe UI", 9), anchor="w",
+        ).pack(fill="x", padx=15)
+
+        # ── Log card ──────────────────────────────────────────────────────────
+        tk.Label(
+            self, text="Log", bg=BG, fg=TEXT,
+            font=("Segoe UI", 9, "bold"),
+        ).pack(anchor="w", padx=15, pady=(10, 4))
+
+        log_card = self._card(self, fill="x", padx=14)
+        self._log = tk.Text(
+            log_card, height=5, relief="flat", bd=0,
+            bg="#1e1e1e", fg="#d4d4d4", font=("Consolas", 9),
+            insertbackground="#d4d4d4",
+        )
+        log_scroll = tk.Scrollbar(log_card, command=self._log.yview, bg="#2d2d2d")
+        self._log.configure(yscrollcommand=log_scroll.set, state="disabled")
+        log_scroll.pack(side="right", fill="y", padx=(0, 1), pady=1)
+        self._log.pack(fill="x", padx=1, pady=1)
+
+        # ── Bottom bar ────────────────────────────────────────────────────────
+        bottom = tk.Frame(self, bg=BG)
+        bottom.pack(fill="x", padx=14, pady=(10, 14))
+
+        self._start_btn = self._btn(
+            bottom, "⬇  Download All", self._start_queue, ACCENT,
+            font_bold=True, padx=18, pady=8,
+        )
+        self._start_btn.pack(side="left", padx=(0, 8))
+
+        self._cancel_btn = self._btn(
+            bottom, "Cancel", self._cancel, RED,
+            padx=18, pady=8,
+        )
+        self._cancel_btn.config(state="disabled")
+        self._cancel_btn.pack(side="left")
+
+        self._update_btn = self._btn(
+            bottom, "", self._apply_update, GREEN, padx=12, pady=8,
+        )
+        self._version_lbl = tk.Label(
+            bottom, text=f"v{APP_VERSION}", bg=BG,
+            fg=TEXT_MUTED, font=("Segoe UI", 8),
+        )
+        self._version_lbl.pack(side="right")
+
     # ── Persistence ───────────────────────────────────────────────────────────
 
     def _save_settings(self, *_):
         save_config({"folder": self._download_folder, "format": self._fmt_var.get()})
-
-    # ── UI ────────────────────────────────────────────────────────────────────
-
-    def _build_ui(self):
-        pad = {"padx": 12, "pady": 4}
-
-        # URL row
-        url_frame = tk.Frame(self)
-        url_frame.pack(fill="x", padx=12, pady=(10, 2))
-        tk.Label(url_frame, text="URL:", width=7, anchor="w").pack(side="left")
-        self._url_var = tk.StringVar()
-        self._url_var.trace_add("write", self._on_url_change)
-        tk.Entry(url_frame, textvariable=self._url_var, width=38).pack(side="left", fill="x", expand=True)
-        self._fetch_btn = tk.Button(url_frame, text="Fetch", command=self._fetch_info, width=6)
-        self._fetch_btn.pack(side="left", padx=(4, 0))
-        tk.Button(
-            url_frame, text="Add to Queue", command=self._add_to_queue,
-            bg="#107c10", fg="white", relief="flat", padx=6,
-        ).pack(side="left", padx=(4, 0))
-
-        # Video info label
-        self._info_var = tk.StringVar(value="")
-        tk.Label(
-            self, textvariable=self._info_var, anchor="w",
-            fg="#0078d4", wraplength=500,
-        ).pack(fill="x", padx=12, pady=(0, 2))
-
-        # Format row
-        fmt_frame = tk.Frame(self)
-        fmt_frame.pack(fill="x", **pad)
-        tk.Label(fmt_frame, text="Format:", width=7, anchor="w").pack(side="left")
-        self._fmt_var = tk.StringVar(value=list(FORMAT_OPTIONS.keys())[0])
-        self._fmt_var.trace_add("write", self._save_settings)
-        ttk.Combobox(
-            fmt_frame, textvariable=self._fmt_var,
-            values=list(FORMAT_OPTIONS.keys()), state="readonly", width=46,
-        ).pack(side="left")
-
-        # Folder row
-        folder_frame = tk.Frame(self)
-        folder_frame.pack(fill="x", **pad)
-        tk.Label(folder_frame, text="Save to:", width=7, anchor="w").pack(side="left")
-        self._folder_label = tk.Label(
-            folder_frame, text=self._download_folder,
-            anchor="w", relief="sunken", bg="white", width=38,
-        )
-        self._folder_label.pack(side="left", fill="x", expand=True)
-        tk.Button(folder_frame, text="Browse…", command=self._browse).pack(side="left", padx=(6, 0))
-
-        # FFmpeg status row
-        ffmpeg_frame = tk.Frame(self)
-        ffmpeg_frame.pack(fill="x", **pad)
-        tk.Label(ffmpeg_frame, text="FFmpeg:", width=7, anchor="w").pack(side="left")
-        self._ffmpeg_status_var = tk.StringVar()
-        self._ffmpeg_status_lbl = tk.Label(ffmpeg_frame, textvariable=self._ffmpeg_status_var, anchor="w")
-        self._ffmpeg_status_lbl.pack(side="left", fill="x", expand=True)
-        self._ffmpeg_btn = tk.Button(
-            ffmpeg_frame, text="Install", command=self._install_ffmpeg,
-            bg="#ca5010", fg="white", relief="flat", padx=8,
-        )
-        self._update_ffmpeg_ui()
-
-        # Queue section
-        tk.Label(self, text="Queue", anchor="w", font=("Segoe UI", 9, "bold")).pack(
-            fill="x", padx=12, pady=(10, 2)
-        )
-        queue_frame = tk.Frame(self)
-        queue_frame.pack(fill="both", expand=True, padx=12)
-        qscroll = tk.Scrollbar(queue_frame)
-        qscroll.pack(side="right", fill="y")
-        self._queue_list = tk.Listbox(
-            queue_frame, height=6, yscrollcommand=qscroll.set,
-            selectmode="single", font=("Segoe UI", 9),
-        )
-        self._queue_list.pack(fill="both", expand=True)
-        qscroll.config(command=self._queue_list.yview)
-        tk.Button(self, text="Remove selected", command=self._remove_selected).pack(
-            anchor="e", padx=12, pady=(2, 0)
-        )
-
-        # Progress bar
-        self._progress = ttk.Progressbar(self, length=440, mode="determinate")
-        self._progress.pack(fill="x", padx=12, pady=(10, 2))
-
-        # Status label
-        self._status_var = tk.StringVar(value="Ready.")
-        tk.Label(self, textvariable=self._status_var, anchor="w", fg="#444").pack(fill="x", padx=12)
-
-        # Log section
-        tk.Label(self, text="Log", anchor="w", font=("Segoe UI", 9, "bold")).pack(
-            fill="x", padx=12, pady=(8, 2)
-        )
-        log_frame = tk.Frame(self)
-        log_frame.pack(fill="x", padx=12)
-        logscroll = tk.Scrollbar(log_frame)
-        logscroll.pack(side="right", fill="y")
-        self._log = tk.Text(
-            log_frame, height=6, state="disabled",
-            bg="#1e1e1e", fg="#d4d4d4", font=("Consolas", 9),
-            yscrollcommand=logscroll.set,
-        )
-        self._log.pack(fill="x")
-        logscroll.config(command=self._log.yview)
-
-        # Bottom row: Download buttons + version/update
-        btn_frame = tk.Frame(self)
-        btn_frame.pack(fill="x", padx=12, pady=(8, 12))
-
-        self._start_btn = tk.Button(
-            btn_frame, text="Download All", command=self._start_queue,
-            bg="#0078d4", fg="white", font=("Segoe UI", 10, "bold"),
-            relief="flat", padx=20, pady=6, cursor="hand2",
-        )
-        self._start_btn.pack(side="left", padx=(0, 6))
-        self._cancel_btn = tk.Button(
-            btn_frame, text="Cancel", command=self._cancel,
-            bg="#c50f1f", fg="white", font=("Segoe UI", 10),
-            relief="flat", padx=20, pady=6, cursor="hand2", state="disabled",
-        )
-        self._cancel_btn.pack(side="left")
-
-        # Version label + update button (right side)
-        self._update_btn = tk.Button(
-            btn_frame, text="", command=self._apply_update,
-            relief="flat", fg="white", bg="#107c10",
-            font=("Segoe UI", 9), padx=10, pady=6, cursor="hand2",
-        )
-        self._version_lbl = tk.Label(
-            btn_frame, text=f"v{APP_VERSION}", fg="#aaa", font=("Segoe UI", 8),
-        )
-        self._version_lbl.pack(side="right")
 
     # ── Auto-update ───────────────────────────────────────────────────────────
 
@@ -276,7 +391,6 @@ class YTDApp(tk.Tk):
 
     def _on_update_available(self, latest, url):
         self._pending_update_url = url
-        self._version_lbl.config(text=f"v{APP_VERSION}")
         self._update_btn.config(text=f"↑ Update to v{latest}")
         self._update_btn.pack(side="right", padx=(0, 8))
 
@@ -318,22 +432,19 @@ class YTDApp(tk.Tk):
                 f'del "{new_exe}"\n'
                 f'del "%~f0"\n'
             )
-        subprocess.Popen(
-            ["cmd", "/c", bat],
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        subprocess.Popen(["cmd", "/c", bat], creationflags=subprocess.CREATE_NO_WINDOW)
         self.quit()
 
     # ── FFmpeg install ─────────────────────────────────────────────────────────
 
     def _update_ffmpeg_ui(self):
         if ffmpeg_available():
-            self._ffmpeg_status_var.set("Ready")
-            self._ffmpeg_status_lbl.config(fg="#107c10")
+            self._ffmpeg_status_var.set("✓  Ready")
+            self._ffmpeg_status_lbl.config(fg=GREEN)
             self._ffmpeg_btn.pack_forget()
         else:
             self._ffmpeg_status_var.set("Not installed — needed for best quality and MP3")
-            self._ffmpeg_status_lbl.config(fg="#ca5010")
+            self._ffmpeg_status_lbl.config(fg=ORANGE)
             self._ffmpeg_btn.pack(side="left", padx=(6, 0))
 
     def _install_ffmpeg(self):
@@ -356,12 +467,11 @@ class YTDApp(tk.Tk):
             def _progress(count, block, total):
                 if total > 0:
                     pct = min(count * block / total * 100, 100)
-                    self.after(0, self._ffmpeg_status_var.set,
-                               f"Downloading FFmpeg… {pct:.0f}%")
+                    self.after(0, self._ffmpeg_status_var.set, f"Downloading FFmpeg… {pct:.0f}%")
 
             urllib.request.urlretrieve(FFMPEG_ZIP_URL, tmp, reporthook=_progress)
-
             self.after(0, self._ffmpeg_status_var.set, "Extracting…")
+
             with zipfile.ZipFile(tmp) as z:
                 for name in z.namelist():
                     if name.endswith("/bin/ffmpeg.exe"):
@@ -384,7 +494,7 @@ class YTDApp(tk.Tk):
 
     def _on_ffmpeg_error(self, msg):
         self._ffmpeg_status_var.set("Install failed — try again")
-        self._ffmpeg_status_lbl.config(fg="#c50f1f")
+        self._ffmpeg_status_lbl.config(fg=RED)
         self._ffmpeg_btn.config(state="normal", text="Retry")
         self._log_write(f"✗ FFmpeg install error: {msg}")
 
@@ -461,17 +571,11 @@ class YTDApp(tk.Tk):
 
     def _refresh_queue_list(self):
         self._queue_list.delete(0, "end")
-        icons = {
-            "pending": "⏳", "downloading": "⬇", "done": "✓",
-            "error": "✗", "cancelled": "–",
-        }
-        colors = {
-            "done": "#107c10", "error": "#c50f1f",
-            "cancelled": "#888888", "downloading": "#0078d4",
-        }
+        icons = {"pending": "⏳", "downloading": "⬇", "done": "✓", "error": "✗", "cancelled": "–"}
+        colors = {"done": GREEN, "error": RED, "cancelled": TEXT_MUTED, "downloading": ACCENT}
         for item in self._queue:
             icon = icons.get(item["status"], "")
-            self._queue_list.insert("end", f"  {icon}  {item['title']}")
+            self._queue_list.insert("end", f"   {icon}  {item['title']}")
             color = colors.get(item["status"])
             if color:
                 self._queue_list.itemconfig("end", fg=color)
