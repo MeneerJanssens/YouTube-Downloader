@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write  # required by SignPath to verify the build origin
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -41,6 +42,42 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: pyinstaller --windowed --icon=icon.png --add-data "icon.ico:." --name YTD ytd.py
+
+      # ── Windows code signing via SignPath Foundation (free for open source) ──
+      # Setup: https://signpath.io/product/foundation
+      # Once approved, set these in your GitHub repo settings:
+      #   Secret : SIGNPATH_API_TOKEN   (Settings → Secrets → Actions)
+      #   Variable: SIGNPATH_ORG_ID     (Settings → Variables → Actions)
+      # In SignPath dashboard: project-slug = "youtube-downloader",
+      #   artifact-configuration-slug = "exe", signing-policy-slug = "release-signing"
+
+      - name: Upload unsigned exe for signing
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORG_ID != ''
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-YTD
+          path: dist/YTD.exe
+
+      - name: Sign exe (SignPath Foundation)
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORG_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORG_ID }}
+          project-slug: youtube-downloader
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: exe
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed/
+
+      - name: Use signed exe for release
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORG_ID != ''
+        run: copy signed\YTD.exe dist\YTD.exe
+        shell: cmd
+
+      # ─────────────────────────────────────────────────────────────────────────
 
       - name: Zip macOS app
         if: runner.os == 'macOS'
