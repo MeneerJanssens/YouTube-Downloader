@@ -1,3 +1,5 @@
+import sys
+
 from PIL import Image, ImageDraw
 
 
@@ -26,7 +28,19 @@ def make_frame(size):
     return img
 
 
-base = make_frame(256)
-base.save("icon.ico", format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-base.save("icon.png")
-print("icon.ico and icon.png saved")
+# Render every size separately so the small icons stay crisp.
+SIZES = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+frames = [make_frame(s) for s, _ in SIZES]
+
+frames[0].save("icon.ico", format="ICO", sizes=SIZES, append_images=frames[1:])
+frames[-1].save("icon.png")
+
+# .icns is only writable by Pillow on macOS (used by the CI macOS build).
+if sys.platform == "darwin":
+    try:
+        frames[0].save("icon.icns", format="ICNS", append_images=frames[1:])
+        print("icon.icns saved")
+    except Exception as e:
+        print("warning: could not write icon.icns:", e)
+
+print("icons saved")

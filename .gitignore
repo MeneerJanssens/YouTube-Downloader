@@ -1,4 +1,5 @@
 build/
 dist/
 *.spec
+!YTD.spec
 __pycache__/
