@@ -27,7 +27,7 @@ def _resource(filename):
     return os.path.join(base, filename)
 
 
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 RELEASES_API = "https://api.github.com/repos/MeneerJanssens/YouTube-Downloader/releases/latest"
 
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ytd_config.json")
