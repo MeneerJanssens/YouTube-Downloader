@@ -112,7 +112,7 @@ def _download_file(url, path, progress_cb=None, timeout=60, resume=False):
 
     total = int(resp.headers.get("Content-Length") or 0) + offset
     done = offset
-    with open(path, mode) as f:
+    with resp, open(path, mode) as f:
         while True:
             chunk = resp.read(256 * 1024)
             if not chunk:
@@ -208,7 +208,7 @@ def _extract_executable(src, dest, basename):
     if lower.endswith((".tar.gz", ".tgz")):
         with tarfile.open(src) as t:
             for member in t.getmembers():
-                if os.path.basename(member.name.rstrip("/")) in wanted:
+                if member.isfile() and os.path.basename(member.name) in wanted:
                     with t.extractfile(member) as fsrc, open(dest, "wb") as fdst:
                         shutil.copyfileobj(fsrc, fdst)
                     return
@@ -359,8 +359,9 @@ class YTDApp(tk.Tk):
                 "Install it and restart YTD:\n"
                 "    pip install yt-dlp",
             )
-            self.quit()
-            return
+            # quit() is a no-op before mainloop() runs — tear down and exit.
+            self.destroy()
+            sys.exit(1)
 
         if self._saved_format and self._saved_format in FORMAT_OPTIONS:
             self._fmt_var.set(self._saved_format)
@@ -1021,7 +1022,8 @@ class YTDApp(tk.Tk):
             )
             return
 
-        if "Audio only" in self._fmt_var.get() and not ffmpeg_available():
+        fmt_key = self._fmt_var.get()
+        if "Audio only" in fmt_key and not ffmpeg_available():
             if messagebox.askyesno(
                 "FFmpeg required",
                 "MP3 conversion requires FFmpeg.\n\nInstall it now?",
@@ -1033,12 +1035,20 @@ class YTDApp(tk.Tk):
         self._cancel_event.clear()
         self._start_btn.config(state="disabled")
         self._cancel_btn.config(state="normal")
-        threading.Thread(target=self._run_queue, daemon=True).start()
+        # Snapshot settings on the main thread: Tk variables must not be read
+        # from the worker, and changing them mid-run shouldn't affect this run.
+        threading.Thread(
+            target=self._run_queue, args=(fmt_key, self._download_folder), daemon=True,
+        ).start()
 
-    def _run_queue(self):
-        for item in self._queue:
-            if item["status"] != "pending":
-                continue
+    def _run_queue(self, fmt_key, folder):
+        # Re-scan for the next pending item each time instead of iterating the
+        # list: the user may remove items from the queue while it runs, which
+        # would make a for-loop skip entries.
+        while True:
+            item = next((it for it in list(self._queue) if it["status"] == "pending"), None)
+            if item is None:
+                break
             if self._cancel_event.is_set():
                 item["status"] = "cancelled"
                 self.after(0, self._refresh_queue_list)
@@ -1046,13 +1056,12 @@ class YTDApp(tk.Tk):
             item["status"] = "downloading"
             self.after(0, self._refresh_queue_list)
             self.after(0, self._update_progress, 0, f"Starting: {item['title']}…")
-            success, _ = self._download_one(item["url"])
+            success, _ = self._download_one(item["url"], fmt_key, folder)
             item["status"] = "cancelled" if self._cancel_event.is_set() else ("done" if success else "error")
             self.after(0, self._refresh_queue_list)
         self.after(0, self._on_queue_done)
 
-    def _download_one(self, url):
-        fmt_key = self._fmt_var.get()
+    def _download_one(self, url, fmt_key, folder):
         fmt = FORMAT_OPTIONS[fmt_key]
         audio_only = "Audio only" in fmt_key
 
@@ -1068,7 +1077,7 @@ class YTDApp(tk.Tk):
         ydl_opts = {
             "format": fmt,
             "noplaylist": True,
-            "outtmpl": os.path.join(self._download_folder, "%(title)s.%(ext)s"),
+            "outtmpl": os.path.join(folder, "%(title)s.%(ext)s"),
             "progress_hooks": [self._progress_hook],
             "quiet": True,
             "no_warnings": False,
@@ -1113,8 +1122,8 @@ class YTDApp(tk.Tk):
                     ydl.download([url])
                 if self._cancel_event.is_set():
                     return False, "cancelled"
-                self.after(0, self._set_status, f"Done! Saved to: {self._download_folder}")
-                self.after(0, self._log_write, f"✓ Saved to {self._download_folder}")
+                self.after(0, self._set_status, f"Done! Saved to: {folder}")
+                self.after(0, self._log_write, f"✓ Saved to {folder}")
                 return True, None
             except Exception as exc:
                 last_msg = str(exc)

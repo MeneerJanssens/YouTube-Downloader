@@ -4,7 +4,7 @@ A simple desktop app for downloading YouTube videos. No Python required.
 
 ## Download
 
-Grab the latest version from the [Releases](https://github.com/MeneerJanssens/YTD/releases) page:
+Grab the latest version from the [Releases](https://github.com/MeneerJanssens/YouTube-Downloader/releases) page:
 
 | Platform | File |
 |----------|------|
@@ -41,7 +41,7 @@ MP3 conversion requires **FFmpeg**. YTD shows its status in the Settings panel:
 
 ## For developers
 
-Requirements: Python 3.8+, [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+Requirements: Python 3.10+, [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 
 ```
 pip install yt-dlp

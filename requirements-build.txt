@@ -1,6 +1,6 @@
 # Build-only dependencies, pinned for reproducible releases.
 # Bump deliberately (and test the build) rather than on every commit.
 # yt-dlp must be recent enough for its JS-runtime support (EJS / quickjs).
-yt-dlp==2026.7.4
-pyinstaller==6.10.0
+yt-dlp==2026.10.21
+pyinstaller==6.22.3
 pillow==13.0.0

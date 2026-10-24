@@ -23,9 +23,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -59,7 +59,7 @@ jobs:
       - name: Upload unsigned exe for signing
         if: runner.os == 'Windows' && vars.SIGNPATH_ORG_ID != ''
         id: upload-unsigned
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unsigned-YTD
           path: dist/YTD.exe
@@ -90,12 +90,12 @@ jobs:
 
       - name: Upload Windows exe to release
         if: runner.os == 'Windows'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/YTD.exe
 
       - name: Upload macOS zip to release
         if: runner.os == 'macOS'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: YTD-mac.zip
