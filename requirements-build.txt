@@ -3,4 +3,4 @@
 # yt-dlp must be recent enough for its JS-runtime support (EJS / quickjs).
 yt-dlp==2026.7.4
 pyinstaller==6.10.0
-pillow==12.3.0
+pillow==13.0.0
