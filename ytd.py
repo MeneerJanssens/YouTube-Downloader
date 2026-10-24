@@ -9,6 +9,7 @@ import platform
 import tarfile
 import urllib.request
 import urllib.error
+import urllib.parse
 import zipfile
 import tempfile
 import subprocess
@@ -1089,10 +1090,16 @@ class YTDApp(tk.Tk):
         jr = js_runtime_opts()
         if jr:
             ydl_opts["js_runtimes"] = jr
-        elif "youtu.be" in url or "youtube.com" in url:
-            self.after(0, self._log_write,
-                       "[warn] No JavaScript runtime found — YouTube downloads may fail. "
-                       "Install one from the Settings panel.")
+        else:
+            host = (urllib.parse.urlparse(url).hostname or "").lower()
+            is_youtube = (
+                host == "youtu.be" or host.endswith(".youtu.be") or
+                host == "youtube.com" or host.endswith(".youtube.com")
+            )
+            if is_youtube:
+                self.after(0, self._log_write,
+                           "[warn] No JavaScript runtime found — YouTube downloads may fail. "
+                           "Install one from the Settings panel.")
 
         loc = ffmpeg_location()
         if loc:
